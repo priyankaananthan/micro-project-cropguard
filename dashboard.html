@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Activity — CropGuard AI{% endblock %}
+{% block content %}
+
+<section class="cg-section">
+  <div class="container">
+    <span class="cg-eyebrow">Overview</span>
+    <h1 class="mb-4" style="font-size:2rem">Platform activity</h1>
+
+    <div class="row g-3 mb-5">
+      <div class="col-md-4">
+        <div class="cg-stat-card">
+          <div class="num">{{ total }}</div>
+          <div class="lbl">Total leaf scans</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="cg-stat-card">
+          <div class="num" style="color:#2D6A4F">{{ healthy }}</div>
+          <div class="lbl">Healthy results</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="cg-stat-card">
+          <div class="num" style="color:#A63A2E">{{ deficient }}</div>
+          <div class="lbl">Deficiencies flagged</div>
+        </div>
+      </div>
+    </div>
+
+    <h5 class="mb-3">Recent scans</h5>
+    {% if recent|length == 0 %}
+    <p class="text-muted">No scans yet — <a href="{{ url_for('detect') }}">run your first one</a>.</p>
+    {% else %}
+    <div class="row g-3">
+      {% for r in recent %}
+      <div class="col-md-6 col-lg-3">
+        <a href="{{ url_for('results', report_id=r['report_id']) }}" class="text-decoration-none">
+          <div class="cg-card">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <strong style="color:var(--forest)">{{ r['crop_type'] }}</strong>
+              <span class="cg-badge-severity badge-{{ r['severity_level']|lower }}" style="font-size:.7rem">{{ r['severity_level'] }}</span>
+            </div>
+            <div class="text-muted small mb-1">{{ r['deficiency_type'] }}</div>
+            <div class="cg-mono small text-muted">{{ r['report_id'] }}</div>
+          </div>
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

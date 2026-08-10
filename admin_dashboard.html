@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — CropGuard AI{% endblock %}
+{% block content %}
+
+<section class="cg-section pt-4">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+      <div>
+        <span class="cg-eyebrow">Host control panel</span>
+        <h1 style="font-size:1.9rem" class="mb-0">Admin Dashboard</h1>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('admin_fertilizers') }}" class="btn btn-cg-outline btn-sm"><i class="fa-solid fa-flask-vial me-1"></i>Fertilizer Rules</a>
+        <a href="{{ url_for('admin_password') }}" class="btn btn-cg-outline btn-sm"><i class="fa-solid fa-key me-1"></i>Security</a>
+        <a href="{{ url_for('admin_export_csv') }}" class="btn btn-cg-outline btn-sm"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</a>
+        <a href="{{ url_for('admin_logout') }}" class="btn btn-cg-primary btn-sm"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</a>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num">{{ total }}</div><div class="lbl">Total scans</div></div></div>
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num" style="color:#2D6A4F">{{ healthy }}</div><div class="lbl">Healthy</div></div></div>
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num" style="color:#A63A2E">{{ deficient }}</div><div class="lbl">Deficient</div></div></div>
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num">{{ daily }}</div><div class="lbl">Scans today</div></div></div>
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num" style="font-size:1.3rem">{{ top_deficiency }}</div><div class="lbl">Top deficiency</div></div></div>
+      <div class="col-6 col-lg-2"><div class="cg-stat-card"><div class="num" style="font-size:1.3rem">{{ top_crop }}</div><div class="lbl">Top crop</div></div></div>
+    </div>
+
+    <div class="row g-4 mb-4">
+      <div class="col-lg-7">
+        <div class="cg-card">
+          <h6 class="mb-3">Deficiency distribution</h6>
+          <canvas id="deficiencyChart" height="120"></canvas>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="cg-card">
+          <h6 class="mb-3">Severity ratio</h6>
+          <canvas id="severityChart" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="cg-card">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+        <h6 class="mb-0">Prediction log</h6>
+        <form class="d-flex gap-2" method="GET">
+          <select name="crop" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">All crops</option>
+            {% for c in crops %}
+            <option value="{{ c }}" {{ 'selected' if crop_filter==c }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+          <select name="severity" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">All severities</option>
+            {% for s in ['None','Mild','Moderate','Severe'] %}
+            <option value="{{ s }}" {{ 'selected' if severity_filter==s }}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-cg align-middle">
+          <thead>
+            <tr>
+              <th>Report ID</th><th>Crop</th><th>Diagnosis</th><th>Severity</th><th>Confidence</th><th>Date</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in logs %}
+            <tr>
+              <td class="cg-mono">{{ r['report_id'] }}</td>
+              <td>{{ r['crop_type'] }}</td>
+              <td>{{ r['deficiency_type'] }}</td>
+              <td><span class="cg-badge-severity badge-{{ r['severity_level']|lower }}">{{ r['severity_level'] }}</span></td>
+              <td>{{ r['confidence'] }}%</td>
+              <td class="text-muted small">{{ r['created_at'] }}</td>
+              <td><a href="{{ url_for('results', report_id=r['report_id']) }}" class="btn btn-sm btn-cg-outline">View</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">No matching records.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script>
+  window.cgDeficiencyData = {
+    labels: [{% for d in deficiency_dist %}"{{ d['deficiency_type'] }}",{% endfor %}],
+    values: [{% for d in deficiency_dist %}{{ d['c'] }},{% endfor %}]
+  };
+  window.cgSeverityData = {
+    labels: [{% for s in severity_dist %}"{{ s['severity_level'] }}",{% endfor %}],
+    values: [{% for s in severity_dist %}{{ s['c'] }},{% endfor %}]
+  };
+</script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}

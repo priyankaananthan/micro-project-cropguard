@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Admin Login — CropGuard AI{% endblock %}
+{% block content %}
+
+<div class="cg-auth-wrap">
+  <div class="cg-auth-card">
+    <div class="text-center mb-4">
+      <span class="cg-brand-mark" style="margin:0 auto"><i class="fa-solid fa-lock"></i></span>
+      <h3 class="mt-3 mb-1">Host Admin Portal</h3>
+      <p class="text-muted small">Sign in to manage diagnostics & fertilizer rules</p>
+    </div>
+    <form method="POST" action="{{ url_for('admin_login') }}">
+      <div class="mb-3">
+        <label class="form-label">Username</label>
+        <input type="text" name="username" class="form-control" required autofocus>
+      </div>
+      <div class="mb-4">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-cg-primary w-100">Sign In</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

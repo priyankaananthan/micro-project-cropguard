@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Fertilizer Rules — CropGuard AI{% endblock %}
+{% block content %}
+
+<section class="cg-section pt-4">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+      <div>
+        <span class="cg-eyebrow">Host control panel</span>
+        <h1 style="font-size:1.9rem" class="mb-0">Fertilizer Rule Configurator</h1>
+      </div>
+      <a href="{{ url_for('admin_dashboard') }}" class="btn btn-cg-outline btn-sm"><i class="fa-solid fa-arrow-left me-1"></i>Back to dashboard</a>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-5">
+        <div class="cg-card">
+          <h6 class="mb-3"><i class="fa-solid fa-plus me-2" style="color:var(--leaf)"></i>Add a new rule</h6>
+          <form method="POST" action="{{ url_for('admin_fertilizers') }}">
+            <input type="hidden" name="action" value="add">
+            <div class="mb-3">
+              <label class="form-label">Crop</label>
+              <select class="form-select" name="crop_type" required>
+                {% for c in crops %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Deficiency</label>
+              <select class="form-select" name="deficiency_type" required>
+                {% for d in deficiencies %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Immediate action</label>
+              <textarea class="form-control" name="immediate_action" rows="2" required></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Recommended fertilizer</label>
+              <input class="form-control" name="recommended_fertilizer" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Application method</label>
+              <input class="form-control" name="application_method" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Dosage</label>
+              <input class="form-control" name="dosage" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Recovery time</label>
+              <input class="form-control" name="recovery_time" required>
+            </div>
+            <button type="submit" class="btn btn-cg-primary w-100">Add rule</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="cg-card">
+          <h6 class="mb-3">Existing rules ({{ rules|length }})</h6>
+          <div class="table-responsive" style="max-height:640px;overflow-y:auto">
+            <table class="table table-cg align-middle table-sm">
+              <thead>
+                <tr><th>Crop</th><th>Deficiency</th><th>Fertilizer</th><th>Dosage</th><th></th></tr>
+              </thead>
+              <tbody>
+                {% for rule in rules %}
+                <tr>
+                  <td>{{ rule['crop_type'] }}</td>
+                  <td>{{ rule['deficiency_type'] }}</td>
+                  <td class="small">{{ rule['recommended_fertilizer'] }}</td>
+                  <td class="small">{{ rule['dosage'] }}</td>
+                  <td>
+                    <div class="d-flex gap-1">
+                      <button type="button" class="btn btn-sm btn-cg-outline" data-bs-toggle="modal" data-bs-target="#editModal{{ rule['id'] }}"><i class="fa-solid fa-pen"></i></button>
+                      <form method="POST" action="{{ url_for('admin_fertilizers') }}" onsubmit="return confirm('Delete this rule?')">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" value="{{ rule['id'] }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-trash"></i></button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+
+                <div class="modal fade" id="editModal{{ rule['id'] }}" tabindex="-1">
+                  <div class="modal-dialog">
+                    <div class="modal-content">
+                      <form method="POST" action="{{ url_for('admin_fertilizers') }}">
+                        <input type="hidden" name="action" value="update">
+                        <input type="hidden" name="id" value="{{ rule['id'] }}">
+                        <div class="modal-header">
+                          <h6 class="modal-title">Edit rule — {{ rule['crop_type'] }} / {{ rule['deficiency_type'] }}</h6>
+                          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                          <div class="mb-2">
+                            <label class="form-label small">Crop</label>
+                            <select class="form-select form-select-sm" name="crop_type">
+                              {% for c in crops %}<option value="{{ c }}" {{ 'selected' if c==rule['crop_type'] }}>{{ c }}</option>{% endfor %}
+                            </select>
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Deficiency</label>
+                            <select class="form-select form-select-sm" name="deficiency_type">
+                              {% for d in deficiencies %}<option value="{{ d }}" {{ 'selected' if d==rule['deficiency_type'] }}>{{ d }}</option>{% endfor %}
+                            </select>
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Immediate action</label>
+                            <textarea class="form-control form-control-sm" name="immediate_action" rows="2">{{ rule['immediate_action'] }}</textarea>
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Recommended fertilizer</label>
+                            <input class="form-control form-control-sm" name="recommended_fertilizer" value="{{ rule['recommended_fertilizer'] }}">
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Application method</label>
+                            <input class="form-control form-control-sm" name="application_method" value="{{ rule['application_method'] }}">
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Dosage</label>
+                            <input class="form-control form-control-sm" name="dosage" value="{{ rule['dosage'] }}">
+                          </div>
+                          <div class="mb-2">
+                            <label class="form-label small">Recovery time</label>
+                            <input class="form-control form-control-sm" name="recovery_time" value="{{ rule['recovery_time'] }}">
+                          </div>
+                        </div>
+                        <div class="modal-footer">
+                          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                          <button type="submit" class="btn btn-sm btn-cg-primary">Save changes</button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

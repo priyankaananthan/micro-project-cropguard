@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Reports — CropGuard AI{% endblock %}
+{% block content %}
+
+<section class="cg-section">
+  <div class="container">
+    <span class="cg-eyebrow">History</span>
+    <h1 class="mb-4" style="font-size:2rem">Recent diagnostic reports</h1>
+
+    {% if rows|length == 0 %}
+    <div class="cg-card text-center py-5">
+      <i class="fa-solid fa-leaf mb-3" style="font-size:2rem;color:var(--leaf)"></i>
+      <p class="text-muted mb-3">No scans yet. Run your first leaf diagnostic to see it here.</p>
+      <a href="{{ url_for('detect') }}" class="btn btn-cg-primary">Scan a leaf</a>
+    </div>
+    {% else %}
+    <div class="table-responsive">
+      <table class="table table-cg align-middle">
+        <thead>
+          <tr>
+            <th>Report ID</th>
+            <th>Crop</th>
+            <th>Diagnosis</th>
+            <th>Severity</th>
+            <th>Confidence</th>
+            <th>Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td class="cg-mono">{{ r['report_id'] }}</td>
+            <td>{{ r['crop_type'] }}</td>
+            <td>{{ r['deficiency_type'] }}</td>
+            <td><span class="cg-badge-severity badge-{{ r['severity_level']|lower }}">{{ r['severity_level'] }}</span></td>
+            <td>{{ r['confidence'] }}%</td>
+            <td class="text-muted small">{{ r['created_at'] }}</td>
+            <td><a href="{{ url_for('results', report_id=r['report_id']) }}" class="btn btn-sm btn-cg-outline">View</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

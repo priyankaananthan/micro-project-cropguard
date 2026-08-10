@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}CropGuard AI — Spectral Leaf Diagnostics{% endblock %}
+{% block content %}
+
+<section class="cg-hero">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-7">
+        <span class="cg-hero-eyebrow"><i class="fa-solid fa-leaf"></i> Computer-vision crop diagnostics</span>
+        <h1>See what's happening <em>inside</em> every leaf, before it shows in the yield.</h1>
+        <p class="lead">CropGuard AI reads the color spectrum of a single leaf photo — chlorophyll, chlorosis, necrosis, anthocyanin — and turns it into a fertilizer plan you can act on today.</p>
+        <div class="cg-hero-actions">
+          <a href="{{ url_for('detect') }}" class="btn btn-cg-primary"><i class="fa-solid fa-camera-retro me-2"></i>Scan a leaf now</a>
+          <a href="#how-it-works" class="btn btn-cg-outline">How it works</a>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="cg-hero-spectrum-card">
+          <h4><i class="fa-solid fa-chart-simple me-2" style="color:var(--leaf-mid)"></i>Sample spectral read</h4>
+          <div class="cg-spectrum mb-1">
+            <span class="seg-green" style="width:58%"></span>
+            <span class="seg-yellow" style="width:27%"></span>
+            <span class="seg-brown" style="width:10%"></span>
+            <span class="seg-purple" style="width:5%"></span>
+          </div>
+          <div class="cg-spectrum-legend">
+            <span><i style="background:#2D6A4F"></i>Green 58%</span>
+            <span><i style="background:#D9B44A"></i>Yellow 27%</span>
+            <span><i style="background:#8C5A3C"></i>Brown 10%</span>
+            <span><i style="background:#7A5C8F"></i>Purple 5%</span>
+          </div>
+          <hr style="border-color:var(--line)">
+          <div class="d-flex justify-content-between">
+            <span class="cg-mono" style="font-size:.85rem;color:var(--ink-soft)">Diagnosis</span>
+            <strong style="color:var(--amber)">Nitrogen · Moderate</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cg-section" id="how-it-works">
+  <div class="container">
+    <span class="cg-eyebrow">How it works</span>
+    <h2 class="mb-5">Three steps from leaf to action plan</h2>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="cg-card">
+          <i class="fa-solid fa-image cg-card-icon"></i>
+          <h5>1. Upload a leaf photo</h5>
+          <p class="text-muted mb-0">Pick your crop species and drop in a clear photo of the affected leaf — no special equipment needed.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="cg-card">
+          <i class="fa-solid fa-wand-magic-sparkles cg-card-icon"></i>
+          <h5>2. HSV spectral analysis</h5>
+          <p class="text-muted mb-0">OpenCV segments the leaf into color bands — green, yellow, brown, purple — to isolate the deficiency signal.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="cg-card">
+          <i class="fa-solid fa-file-shield cg-card-icon"></i>
+          <h5>3. Get a treatment plan</h5>
+          <p class="text-muted mb-0">Receive severity, confidence score, and a fertilizer dosage plan — plus a downloadable PDF certificate.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cg-section cg-section-alt">
+  <div class="container">
+    <span class="cg-eyebrow">Supported crops</span>
+    <h2 class="mb-4">Trained on seven staple crop species</h2>
+    <div>
+      {% for crop in crops %}
+      <span class="cg-crop-chip"><i class="fa-solid fa-seedling" style="color:var(--leaf)"></i>{{ crop }}</span>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="cg-section">
+  <div class="container">
+    <span class="cg-eyebrow">Detectable conditions</span>
+    <h2 class="mb-5">Seven nutrient signals, one photo</h2>
+    <div class="row g-3">
+      {% set conditions = [
+        ("🟢","Healthy","Balanced chlorophyll, no action needed"),
+        ("🟡","Nitrogen","Yellowing from older leaves upward"),
+        ("🟣","Phosphorus","Purpling or darkening leaf edges"),
+        ("🟤","Potassium","Marginal scorching and browning"),
+        ("⚪","Iron","Interveinal chlorosis in young leaves"),
+        ("🟡","Magnesium","Interveinal yellowing in older leaves"),
+        ("⚪","Zinc","Small leaves with chlorotic striping")
+      ] %}
+      {% for emoji, name, desc in conditions %}
+      <div class="col-md-6 col-lg-3">
+        <div class="cg-card">
+          <div style="font-size:1.6rem">{{ emoji }}</div>
+          <h6 class="mt-2 mb-1">{{ name }}</h6>
+          <p class="text-muted small mb-0">{{ desc }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="cg-section cg-section-alt text-center">
+  <div class="container">
+    <h2 class="mb-3">Ready to check your crop?</h2>
+    <p class="text-muted mb-4">Takes under a minute — no account required.</p>
+    <a href="{{ url_for('detect') }}" class="btn btn-cg-primary btn-lg"><i class="fa-solid fa-camera-retro me-2"></i>Start a scan</a>
+  </div>
+</section>
+
+{% endblock %}
