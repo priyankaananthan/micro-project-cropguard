@@ -5,36 +5,26 @@
 <section class="cg-section">
   <div class="container">
     <div class="text-center mb-4">
-      <span class="cg-eyebrow">Leaf scanner</span>
+      <span class="cg-eyebrow"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>AI Leaf Scanner</span>
       <h1 style="font-size:2.2rem">Upload a leaf photo</h1>
-      <p class="text-muted">Choose the crop, tell us where the leaf sits on the plant, then take or upload a photo.</p>
+      <p class="text-muted">Tell us where the leaf sits on the plant, then take or upload a photo — we'll identify the crop and diagnose it automatically.</p>
     </div>
 
-    <form class="cg-form-card" action="{{ url_for('detect') }}" method="POST" enctype="multipart/form-data" id="detectForm">
+    <form class="cg-form-card" action="{{ url_for('detect') }}" method="POST" enctype="multipart/form-data" id="detectForm" novalidate>
       <div class="mb-4">
-        <label class="form-label">Crop species</label>
-        <select class="form-select" name="crop_type" required>
-          <option value="" disabled selected>Select a crop…</option>
-          {% for crop in crops %}
-          <option value="{{ crop }}">{{ crop }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="mb-4">
-        <label class="form-label">Where is this leaf on the plant?</label>
+        <label class="form-label"><i class="fa-solid fa-seedling me-1" style="color:var(--leaf)"></i>Where is this leaf on the plant?</label>
         <div class="cg-leaf-position-options">
           <label class="cg-radio-card">
             <input type="radio" name="leaf_position" value="old" required>
             <div>
-              <strong>Older / lower leaf</strong>
+              <strong><i class="fa-solid fa-arrow-down-short-wide me-1"></i>Older / lower leaf</strong>
               <span class="text-muted small d-block">Near the base of the plant, been growing a while</span>
             </div>
           </label>
           <label class="cg-radio-card">
             <input type="radio" name="leaf_position" value="young">
             <div>
-              <strong>Newer / younger leaf</strong>
+              <strong><i class="fa-solid fa-arrow-up-short-wide me-1"></i>Newer / younger leaf</strong>
               <span class="text-muted small d-block">Fresh growth near the top or growing tip</span>
             </div>
           </label>
@@ -43,30 +33,63 @@
       </div>
 
       <div class="mb-3">
-        <label class="form-label">Leaf image</label>
-        <div class="cg-dropzone" id="dropzone">
-          <i class="fa-solid fa-cloud-arrow-up"></i>
-          <p class="mb-1 fw-semibold" id="dropzoneText">Drag & drop a leaf photo here</p>
-          <p class="text-muted small mb-3">or PNG, JPG, JPEG, WEBP (max 8MB)</p>
-          <div class="d-flex gap-2 justify-content-center flex-wrap" onclick="event.stopPropagation()">
-            <button type="button" class="btn btn-cg-outline btn-sm" id="takePhotoBtn"><i class="fa-solid fa-camera me-1"></i>Take a photo</button>
-            <button type="button" class="btn btn-cg-outline btn-sm" id="chooseGalleryBtn"><i class="fa-solid fa-images me-1"></i>Choose from gallery</button>
+        <label class="form-label" id="leafImageLabel"><i class="fa-solid fa-camera me-1" style="color:var(--leaf)"></i>Leaf image</label>
+        <div class="cg-dropzone" id="dropzone" role="button" tabindex="0" aria-labelledby="leafImageLabel">
+
+          <div id="dropzoneInner">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            <p class="mb-1 fw-semibold" id="dropzoneText">Drag & drop a leaf photo here</p>
+            <p class="text-muted small mb-3">or PNG, JPG, JPEG, WEBP (max 8MB)</p>
+            <div class="d-flex gap-2 justify-content-center flex-wrap" onclick="event.stopPropagation()">
+              <button type="button" class="btn btn-cg-outline btn-sm" id="takePhotoBtn" aria-label="Take a photo using your camera"><i class="fa-solid fa-camera me-1"></i>Take a photo</button>
+              <button type="button" class="btn btn-cg-outline btn-sm" id="chooseGalleryBtn" aria-label="Choose an image from your device"><i class="fa-solid fa-images me-1"></i>Upload image</button>
+            </div>
           </div>
-          <input type="file" name="leaf_image" id="leafImage" accept=".png,.jpg,.jpeg,.webp" hidden required>
+
+          <div id="previewWrap" style="display:none">
+            <div class="cg-preview-card" onclick="event.stopPropagation()">
+              <img id="previewImg" src="" alt="Selected leaf photo preview">
+              <div class="cg-preview-meta">
+                <div class="cg-preview-name"><i class="fa-solid fa-circle-check"></i><span id="previewName"></span></div>
+                <div class="cg-preview-size" id="previewSize"></div>
+                <div class="cg-preview-actions">
+                  <button type="button" id="changeImageBtn"><i class="fa-solid fa-arrows-rotate me-1"></i>Change</button>
+                  <button type="button" id="removeImageBtn" class="cg-remove"><i class="fa-solid fa-xmark me-1"></i>Remove</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <input type="file" name="leaf_image" id="leafImage" accept=".png,.jpg,.jpeg,.webp" hidden required aria-required="true">
           <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
           <input type="file" id="galleryInput" accept=".png,.jpg,.jpeg,.webp" hidden>
         </div>
-        <div id="previewWrap" class="mt-3 text-center" style="display:none">
-          <img id="previewImg" src="" alt="Preview" style="max-height:220px;border-radius:12px;border:1px solid var(--line)">
-        </div>
       </div>
 
-      <button type="submit" class="btn btn-cg-primary w-100 mt-3" id="submitBtn">
+      <div class="cg-autodetect-note mb-3">
+        <i class="fa-solid fa-robot" aria-hidden="true"></i>
+        <span>Crop species is detected automatically from the photo — no need to select it. You'll see the detected crop (and how confident we are) on your results page.</span>
+      </div>
+
+      <button type="submit" class="btn btn-cg-primary w-100 mt-2" id="submitBtn">
         <i class="fa-solid fa-microscope me-2"></i>Run diagnostic scan
       </button>
     </form>
   </div>
 </section>
+
+<!-- Analysis progress overlay: shown only for the real duration of the
+     server request. Removed automatically when the browser navigates to
+     the results page (or stays visible if an error redirects back). -->
+<div class="cg-analyzing-overlay" id="analyzingOverlay" role="status" aria-live="polite">
+  <div class="cg-analyzing-card">
+    <h6><i class="fa-solid fa-microscope"></i>Analyzing your leaf</h6>
+    <div class="cg-step" data-step="1"><span class="cg-step-icon"><i class="fa-regular fa-circle"></i></span>Preparing image…</div>
+    <div class="cg-step" data-step="2"><span class="cg-step-icon"><i class="fa-regular fa-circle"></i></span>Identifying crop characteristics…</div>
+    <div class="cg-step" data-step="3"><span class="cg-step-icon"><i class="fa-regular fa-circle"></i></span>Checking nutrient indicators…</div>
+    <div class="cg-step" data-step="4"><span class="cg-step-icon"><i class="fa-regular fa-circle"></i></span>Preparing your diagnosis…</div>
+  </div>
+</div>
 
 {% endblock %}
 

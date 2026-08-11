@@ -23,20 +23,35 @@
       <i class="fa-solid fa-bars"></i>
     </button>
     <div class="collapse navbar-collapse cg-nav-links" id="cgNavLinks">
-      <a href="{{ url_for('index') }}">Home</a>
-      <a href="{{ url_for('detect') }}">Scan a Leaf</a>
-      <a href="{{ url_for('reports') }}">Reports</a>
-      <a href="{{ url_for('dashboard') }}">Activity</a>
+      <a href="{{ url_for('index') }}"><i class="fa-solid fa-house me-1"></i>Home</a>
+      <a href="{{ url_for('detect') }}"><i class="fa-solid fa-camera me-1"></i>Scan a Leaf</a>
+      <a href="{{ url_for('reports') }}"><i class="fa-solid fa-file-lines me-1"></i>Reports</a>
+      <a href="{{ url_for('dashboard') }}"><i class="fa-solid fa-chart-line me-1"></i>Activity</a>
       <a href="{{ url_for('admin_login') }}" class="cg-nav-admin"><i class="fa-solid fa-lock"></i> Admin</a>
     </div>
   </div>
 </nav>
 
+<div class="cg-marquee">
+  <div class="cg-marquee-track">
+    <span><i class="fa-solid fa-microscope"></i> AI-powered leaf diagnostics in seconds</span>
+    <span><i class="fa-solid fa-seedling"></i> Detects 12 nutrient deficiencies + Healthy</span>
+    <span><i class="fa-solid fa-camera"></i> Just snap a photo — crop species auto-detected</span>
+    <span><i class="fa-solid fa-file-pdf"></i> Instant downloadable treatment reports</span>
+    <span><i class="fa-solid fa-leaf"></i> Rice · Tomato · Maize · Wheat · Cotton · Chilli · Groundnut</span>
+    <span><i class="fa-solid fa-microscope"></i> AI-powered leaf diagnostics in seconds</span>
+    <span><i class="fa-solid fa-seedling"></i> Detects 12 nutrient deficiencies + Healthy</span>
+    <span><i class="fa-solid fa-camera"></i> Just snap a photo — crop species auto-detected</span>
+    <span><i class="fa-solid fa-file-pdf"></i> Instant downloadable treatment reports</span>
+    <span><i class="fa-solid fa-leaf"></i> Rice · Tomato · Maize · Wheat · Cotton · Chilli · Groundnut</span>
+  </div>
+</div>
+
 <div class="container mt-3">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
-        <div class="alert alert-{{ 'danger' if category=='danger' else category }} alert-dismissible fade show cg-alert" role="alert">
+        <div class="alert alert-{{ 'danger' if category=='danger' else category }} alert-dismissible fade show cg-alert" role="alert" data-flash="{{ category }}">
           {{ message }}
           <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>

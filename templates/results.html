@@ -10,19 +10,43 @@
       <div class="col-lg-8">
         <span class="cg-report-id cg-mono"><i class="fa-solid fa-hashtag"></i> {{ r['report_id'] }}</span>
         <h1 class="text-white mt-3 mb-1" style="font-size:2.1rem">{{ emoji }} {{ r['deficiency_type'] }}{{ ' Deficiency' if r['deficiency_type'] != 'Healthy' else '' }}</h1>
-        <p class="mb-2" style="color:rgba(255,255,255,0.8)">{{ r['crop_type'] }} · {{ 'Older/lower leaf' if r['leaf_position']=='old' else 'Newer/younger leaf' }} · Scanned {{ r['created_at'] }}</p>
+        <p class="mb-2" style="color:rgba(255,255,255,0.8)">
+          <i class="fa-solid fa-seedling me-1"></i>{{ r['crop_type'] }}
+          <span class="cg-ai-tag">AI-detected · {{ r['crop_confidence'] }}%</span>
+          · {{ 'Older/lower leaf' if r['leaf_position']=='old' else 'Newer/younger leaf' }} · Scanned {{ r['created_at'] }}
+        </p>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <span class="cg-badge-severity badge-{{ sev }}">{{ r['severity_level'] }} severity</span>
           <span class="cg-confidence-tier tier-{{ tier }}">{{ tier }} confidence signal</span>
         </div>
       </div>
-      <div class="col-lg-4 text-lg-end">
-        <div style="color:rgba(255,255,255,0.7);font-size:.85rem">AI Confidence</div>
-        <div class="cg-confidence-ring">{{ r['confidence'] }}%</div>
+      <div class="col-lg-4 text-center text-lg-end">
+        <div style="color:rgba(255,255,255,0.7);font-size:.85rem" class="mb-2">AI Confidence</div>
+        <div class="cg-ring-wrap mx-auto mx-lg-0" style="margin-left:auto" id="confidenceRing" data-value="{{ r['confidence'] }}">
+          <svg viewBox="0 0 120 120" width="120" height="120">
+            <circle class="cg-ring-track" cx="60" cy="60" r="52"></circle>
+            <circle class="cg-ring-progress" cx="60" cy="60" r="52" transform="rotate(-90 60 60)"></circle>
+          </svg>
+          <div class="cg-ring-label">
+            <span class="val">{{ r['confidence'] }}%</span>
+            <span class="lbl">Confidence</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </section>
+
+{% if r['crop_confidence'] < 50 %}
+<div class="container mt-3">
+  <div class="alert alert-info cg-alert mb-0">
+    <i class="fa-solid fa-circle-info me-2"></i>
+    Crop species is a best-effort guess from leaf shape (not a trained model) — if <strong>{{ r['crop_type'] }}</strong> looks wrong,
+    the deficiency diagnosis itself is still based on your photo's actual colors and is unaffected; only the crop-specific
+    fertilizer dosage might need a manual check.
+  </div>
+</div>
+{% endif %}
 
 {% if tier == 'low' %}
 <div class="container mt-3">
@@ -60,17 +84,21 @@
       </div>
 
       <div class="col-lg-7">
+        <div class="cg-explain-card mb-4">
+          <h6><i class="fa-solid fa-lightbulb"></i>What does this mean?</h6>
+          <p>{{ r['visual_symptoms'] }}</p>
+        </div>
+
         <div class="cg-card mb-4">
           <h6 class="mb-3"><i class="fa-solid fa-notes-medical me-2" style="color:var(--leaf)"></i>Diagnostic Summary</h6>
           <div class="cg-treatment-row"><span class="label">Nutrient category</span><span class="value">{{ category }}</span></div>
           <div class="cg-treatment-row"><span class="label">Affected leaf area</span><span class="value">{{ r['affected_area_pct'] }}%</span></div>
           <div class="cg-treatment-row"><span class="label">Risk level</span><span class="value">{{ r['risk_level'] }}</span></div>
           <div class="cg-treatment-row"><span class="label">Overall health</span><span class="value">{{ r['overall_health'] }}</span></div>
-          <div class="cg-treatment-row"><span class="label">Visual symptoms</span><span class="value">{{ r['visual_symptoms'] }}</span></div>
         </div>
 
         <div class="cg-card">
-          <h6 class="mb-3"><i class="fa-solid fa-flask-vial me-2" style="color:var(--amber)"></i>Treatment & Fertilizer Action Plan</h6>
+          <h6 class="mb-3"><i class="fa-solid fa-flask-vial me-2" style="color:var(--amber)"></i>🌱 Recommended Treatment</h6>
           <div class="cg-treatment-row"><span class="label">Immediate action</span><span class="value">{{ r['immediate_action'] }}</span></div>
           <div class="cg-treatment-row"><span class="label">Recommended fertilizer</span><span class="value">{{ r['recommended_fertilizer'] }}</span></div>
           <div class="cg-treatment-row"><span class="label">Application method</span><span class="value">{{ r['application_method'] }}</span></div>
@@ -79,7 +107,7 @@
         </div>
 
         <div class="d-flex gap-3 mt-4 flex-wrap">
-          <a href="{{ url_for('report_pdf', report_id=r['report_id']) }}" class="btn btn-cg-primary"><i class="fa-solid fa-file-pdf me-2"></i>Download PDF certificate</a>
+          <a href="{{ url_for('report_pdf', report_id=r['report_id']) }}" class="btn btn-cg-primary"><i class="fa-solid fa-file-pdf me-2"></i>📄 Download PDF Report</a>
           <a href="{{ url_for('detect') }}" class="btn btn-cg-outline"><i class="fa-solid fa-rotate-left me-2"></i>Scan another leaf</a>
         </div>
       </div>

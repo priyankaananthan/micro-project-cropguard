@@ -8,10 +8,10 @@
     <h1 class="mb-4" style="font-size:2rem">Recent diagnostic reports</h1>
 
     {% if rows|length == 0 %}
-    <div class="cg-card text-center py-5">
-      <i class="fa-solid fa-leaf mb-3" style="font-size:2rem;color:var(--leaf)"></i>
-      <p class="text-muted mb-3">No scans yet. Run your first leaf diagnostic to see it here.</p>
-      <a href="{{ url_for('detect') }}" class="btn btn-cg-primary">Scan a leaf</a>
+    <div class="cg-card cg-empty-state">
+      <i class="fa-solid fa-seedling"></i>
+      <p><strong>No crop analyses yet.</strong><br>Upload your first leaf image to start your analysis.</p>
+      <a href="{{ url_for('detect') }}" class="btn btn-cg-primary"><i class="fa-solid fa-camera me-2"></i>Scan a leaf</a>
     </div>
     {% else %}
     <div class="table-responsive">
