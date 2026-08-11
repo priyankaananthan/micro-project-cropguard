@@ -169,6 +169,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             report_id TEXT UNIQUE NOT NULL,
             crop_type TEXT NOT NULL,
+            crop_confidence REAL NOT NULL DEFAULT 30,
             leaf_position TEXT NOT NULL DEFAULT 'old',
             image_filename TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -460,6 +461,79 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     }
 
 
+def detect_crop_type(image_path):
+    """
+    Best-effort crop-species guess from leaf shape alone (aspect ratio,
+    solidity/compactness, and margin lobing via convexity defects).
+
+    IMPORTANT: unlike the deficiency engine, this has no color/texture
+    training data behind it at all -- it's a rough shape-bucket heuristic
+    over 7 visually overlapping crop species. Treat the result as a
+    starting guess, not a reliable identification. Always shown with a
+    low/experimental confidence tag and is user-correctable.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        return "Rice", 30.0
+
+    img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    bg_white = cv2.inRange(hsv, (0, 0, 235), (180, 20, 255))
+    bg_black = cv2.inRange(hsv, (0, 0, 0), (180, 255, 18))
+    leaf_mask = cv2.bitwise_not(cv2.bitwise_or(bg_white, bg_black))
+
+    contours, _ = cv2.findContours(leaf_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return "Rice", 30.0
+    largest = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest)
+    if area < 400:
+        return "Rice", 30.0
+
+    hull = cv2.convexHull(largest)
+    hull_area = max(cv2.contourArea(hull), 1)
+    solidity = area / hull_area
+
+    rect = cv2.minAreaRect(largest)
+    (rw, rh) = rect[1]
+    long_side, short_side = max(rw, rh), max(min(rw, rh), 1)
+    aspect_ratio = long_side / short_side
+
+    hull_indices = cv2.convexHull(largest, returnPoints=False)
+    defect_count = 0
+    if hull_indices is not None and len(hull_indices) > 3:
+        try:
+            defects = cv2.convexityDefects(largest, hull_indices)
+            if defects is not None:
+                for i in range(defects.shape[0]):
+                    depth = defects[i, 0, 3] / 256.0
+                    if depth > 8:  # ignore tiny noise dents, count real lobes/notches
+                        defect_count += 1
+        except cv2.error:
+            defect_count = 0
+
+    # Shape-bucket scoring per crop (rough stereotypes, not trained data)
+    crop_scores = {
+        "Rice":      max(0.0, aspect_ratio - 4.0) * 3 + (10 if defect_count <= 1 else 0),
+        "Wheat":     max(0.0, min(aspect_ratio, 6.0) - 3.0) * 3 + (8 if defect_count <= 1 else 0),
+        "Maize":     max(0.0, 4.0 - abs(aspect_ratio - 3.0)) * 3 + (6 if defect_count <= 2 else 0),
+        "Cotton":    (defect_count * 6) * (1.0 if aspect_ratio < 1.8 else 0.3),
+        "Groundnut": max(0.0, 2.0 - abs(aspect_ratio - 1.4)) * 5 * (solidity if solidity > 0.85 else 0.3),
+        "Chilli":    max(0.0, 2.2 - abs(aspect_ratio - 2.3)) * 5 * (solidity if solidity > 0.85 else 0.4),
+        "Tomato":    (defect_count * 5 + max(0.0, (0.85 - solidity)) * 40) * (1.0 if aspect_ratio < 2.5 else 0.4),
+    }
+    best_crop = max(crop_scores, key=crop_scores.get)
+    values = np.array(list(crop_scores.values()), dtype=float)
+    labels = list(crop_scores.keys())
+    exp = np.exp((values - values.max()) / 6.0)
+    softmax = exp / exp.sum()
+    confidence = round(float(softmax[labels.index(best_crop)]) * 100, 2)
+    # This classifier is fundamentally weaker evidence than the deficiency
+    # engine -- cap confidence so the UI never implies false certainty.
+    confidence = max(25.0, min(confidence, 65.0))
+    return best_crop, confidence
+
+
 def get_treatment(crop_type, deficiency_type):
     db = get_db()
     row = db.execute(
@@ -595,13 +669,8 @@ def detect():
     if request.method == "GET":
         return render_template("detect.html", crops=CROPS)
 
-    crop_type = request.form.get("crop_type", "").strip()
     leaf_position = request.form.get("leaf_position", "").strip()
     file = request.files.get("leaf_image")
-
-    if not crop_type or crop_type not in CROPS:
-        flash("Please select a valid crop type.", "danger")
-        return redirect(url_for("detect"))
 
     if leaf_position not in ("old", "young"):
         flash("Please tell us whether this is an older/lower leaf or a newer/younger leaf.", "danger")
@@ -612,7 +681,7 @@ def detect():
         return redirect(url_for("detect"))
 
     if not allowed_file(file.filename):
-        flash("Unsupported file type. Please upload PNG, JPG, JPEG or WEBP.", "danger")
+        flash("Please upload a clear JPG, JPEG, PNG, or WEBP image of the leaf.", "danger")
         return redirect(url_for("detect"))
 
     report_id = new_report_id()
@@ -624,8 +693,14 @@ def detect():
     try:
         analysis = analyze_leaf_image(save_path, leaf_position=leaf_position)
     except Exception as exc:
-        flash(f"Could not analyze image: {exc}", "danger")
+        app.logger.error(f"Leaf analysis failed for {filename}: {exc}")
+        flash("Please make sure the image contains a clear crop leaf and try again.", "danger")
         return redirect(url_for("detect"))
+
+    try:
+        crop_type, crop_confidence = detect_crop_type(save_path)
+    except Exception:
+        crop_type, crop_confidence = "Rice", 30.0
 
     treatment = get_treatment(crop_type, analysis["deficiency_type"])
     meta = DEFICIENCY_META.get(analysis["deficiency_type"], {})
@@ -633,6 +708,7 @@ def detect():
     record = {
         "report_id": report_id,
         "crop_type": crop_type,
+        "crop_confidence": crop_confidence,
         "leaf_position": leaf_position,
         "image_filename": filename,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -644,13 +720,13 @@ def detect():
     db = get_db()
     db.execute("""
         INSERT INTO predictions (
-            report_id, crop_type, leaf_position, image_filename, created_at, deficiency_type, confidence,
+            report_id, crop_type, crop_confidence, leaf_position, image_filename, created_at, deficiency_type, confidence,
             confidence_tier, severity_level, affected_area_pct, green_pct, yellow_pct, brown_pct, purple_pct,
             white_pct, visual_symptoms, immediate_action, recommended_fertilizer, application_method,
             dosage, recovery_time, risk_level, overall_health
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
-        record["report_id"], record["crop_type"], record["leaf_position"], record["image_filename"], record["created_at"],
+        record["report_id"], record["crop_type"], record["crop_confidence"], record["leaf_position"], record["image_filename"], record["created_at"],
         record["deficiency_type"], record["confidence"], record["confidence_tier"], record["severity_level"],
         record["affected_area_pct"], record["green_pct"], record["yellow_pct"], record["brown_pct"], record["purple_pct"],
         record["white_pct"], record["visual_symptoms"], record["immediate_action"], record["recommended_fertilizer"],
@@ -682,8 +758,14 @@ def report_pdf(report_id):
         flash("Report not found.", "danger")
         return redirect(url_for("detect"))
     image_path = os.path.join(UPLOAD_DIR, row["image_filename"])
-    pdf_path = generate_pdf_report(dict(row), image_path)
-    return send_file(pdf_path, as_attachment=True, download_name=f"{report_id}_CropGuard_Report.pdf")
+    try:
+        os.makedirs(REPORT_DIR, exist_ok=True)  # in case the host's ephemeral disk was reset
+        pdf_path = generate_pdf_report(dict(row), image_path)
+        return send_file(pdf_path, as_attachment=True, download_name=f"{report_id}_CropGuard_Report.pdf")
+    except Exception as exc:
+        app.logger.error(f"PDF generation failed for {report_id}: {exc}")
+        flash("Unable to generate the PDF report right now. Please try again in a moment.", "danger")
+        return redirect(url_for("results", report_id=report_id))
 
 
 @app.route("/reports")
