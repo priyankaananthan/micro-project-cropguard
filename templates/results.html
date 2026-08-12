@@ -12,7 +12,11 @@
         <h1 class="text-white mt-3 mb-1" style="font-size:2.1rem">{{ emoji }} {{ r['deficiency_type'] }}{{ ' Deficiency' if r['deficiency_type'] != 'Healthy' else '' }}</h1>
         <p class="mb-2" style="color:rgba(255,255,255,0.8)">
           <i class="fa-solid fa-seedling me-1"></i>{{ r['crop_type'] }}
+          {% if r['crop_confidence'] >= 100 %}
+          <span class="cg-ai-tag"><i class="fa-solid fa-check"></i> You selected this</span>
+          {% else %}
           <span class="cg-ai-tag">AI-detected · {{ r['crop_confidence'] }}%</span>
+          {% endif %}
           · {{ 'Older/lower leaf' if r['leaf_position']=='old' else 'Newer/younger leaf' }} · Scanned {{ r['created_at'] }}
         </p>
         <div class="d-flex gap-2 flex-wrap align-items-center">

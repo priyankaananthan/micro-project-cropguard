@@ -12,6 +12,17 @@
 
     <form class="cg-form-card" action="{{ url_for('detect') }}" method="POST" enctype="multipart/form-data" id="detectForm" novalidate>
       <div class="mb-4">
+        <label class="form-label"><i class="fa-solid fa-leaf me-1" style="color:var(--leaf)"></i>Crop species</label>
+        <select class="form-select" name="crop_type">
+          <option value="" selected>🤖 Auto-detect for me</option>
+          {% for crop in crops %}
+          <option value="{{ crop }}">{{ crop }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-muted small mt-1 mb-0"><i class="fa-solid fa-circle-info me-1"></i>Leave on auto-detect, or pick your crop directly if you know it — your choice always wins over the AI guess.</p>
+      </div>
+
+      <div class="mb-4">
         <label class="form-label"><i class="fa-solid fa-seedling me-1" style="color:var(--leaf)"></i>Where is this leaf on the plant?</label>
         <div class="cg-leaf-position-options">
           <label class="cg-radio-card">
@@ -60,15 +71,15 @@
             </div>
           </div>
 
-          <input type="file" name="leaf_image" id="leafImage" accept=".png,.jpg,.jpeg,.webp" hidden required aria-required="true">
-          <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-          <input type="file" id="galleryInput" accept=".png,.jpg,.jpeg,.webp" hidden>
+          <input type="file" name="leaf_image" id="leafImage" accept=".png,.jpg,.jpeg,.webp" class="cg-visually-hidden" required aria-required="true">
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" class="cg-visually-hidden">
+          <input type="file" id="galleryInput" accept=".png,.jpg,.jpeg,.webp" class="cg-visually-hidden">
         </div>
       </div>
 
       <div class="cg-autodetect-note mb-3">
         <i class="fa-solid fa-robot" aria-hidden="true"></i>
-        <span>Crop species is detected automatically from the photo — no need to select it. You'll see the detected crop (and how confident we are) on your results page.</span>
+        <span>If you leave crop species on auto-detect, we'll guess it from the photo's leaf shape and show our confidence on the results page — pick a crop above instead if you want it exact.</span>
       </div>
 
       <button type="submit" class="btn btn-cg-primary w-100 mt-2" id="submitBtn">
