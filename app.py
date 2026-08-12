@@ -323,7 +323,13 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     yellow_mask = cv2.bitwise_and(cv2.inRange(hsv, (18, 40, 60), (34, 255, 255)), leaf_mask)
     brown_mask = cv2.bitwise_and(cv2.inRange(hsv, (5, 40, 20), (20, 255, 180)), leaf_mask)
     purple_mask = cv2.bitwise_and(cv2.inRange(hsv, (125, 25, 20), (160, 255, 200)), leaf_mask)
-    white_mask = cv2.bitwise_and(cv2.inRange(hsv, (0, 0, 170), (180, 35, 255)), leaf_mask)
+    white_mask_raw = cv2.bitwise_and(cv2.inRange(hsv, (0, 0, 170), (180, 35, 255)), leaf_mask)
+    # Camera flash/glare on a glossy leaf creates small bright specular spots
+    # that look identical to "white chlorosis" in raw HSV terms. A real
+    # chlorotic/whitened area is diffuse and covers a meaningful patch of
+    # tissue; glare is small and isolated. Morphological opening removes
+    # the small glare blobs while keeping genuine larger whitened regions.
+    white_mask = cv2.morphologyEx(white_mask_raw, cv2.MORPH_OPEN, np.ones((7, 7), np.uint8))
 
     green_pct = round(cv2.countNonZero(green_mask) / leaf_pixels * 100, 2)
     yellow_pct = round(cv2.countNonZero(yellow_mask) / leaf_pixels * 100, 2)
@@ -350,7 +356,14 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     interveinal_px = max(int(cv2.countNonZero(interveinal_mask)), 1)
     vein_green_pct = cv2.countNonZero(cv2.bitwise_and(green_mask, vein_mask)) / vein_px * 100
     interveinal_yellow_pct = cv2.countNonZero(cv2.bitwise_and(yellow_mask, interveinal_mask)) / interveinal_px * 100
-    interveinal_chlorosis_score = round(min(100.0, (vein_green_pct * interveinal_yellow_pct) / 100), 2)
+    # Real-world photos have natural vein/lighting texture that Canny picks
+    # up even on ordinary leaves. Gate on both components: below the
+    # threshold, treat it as noise (score = 0); at or above it, use the
+    # full raw signal so genuinely strong patterns aren't watered down.
+    if vein_green_pct >= 35.0 and interveinal_yellow_pct >= 30.0:
+        interveinal_chlorosis_score = round(min(100.0, (vein_green_pct * interveinal_yellow_pct) / 100), 2)
+    else:
+        interveinal_chlorosis_score = 0.0
 
     # --- Margin (scorch) analysis ---
     # Pad with a background border first: if the leaf fills the entire
@@ -360,7 +373,13 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     padded = cv2.copyMakeBorder(leaf_mask, 6, 6, 6, 6, cv2.BORDER_CONSTANT, value=0)
     dist_padded = cv2.distanceTransform(padded, cv2.DIST_L2, 5)
     dist = dist_padded[6:-6, 6:-6]
-    margin_mask = ((dist > 0) & (dist < 14)).astype(np.uint8) * 255
+    # Scale the margin band to the leaf's own size: a leaf photographed
+    # small-in-frame needs a thinner band than one filling the whole photo,
+    # otherwise a fixed pixel width is either too thin to catch real edge
+    # scorch or too thick and bleeds into the interior.
+    leaf_radius_px = (leaf_pixels / np.pi) ** 0.5
+    margin_width = max(10, min(40, leaf_radius_px * 0.14))
+    margin_mask = ((dist > 0) & (dist < margin_width)).astype(np.uint8) * 255
     margin_mask = cv2.bitwise_and(margin_mask, leaf_mask)
     interior_mask = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(margin_mask))
     margin_px = max(int(cv2.countNonZero(margin_mask)), 1)
@@ -406,7 +425,7 @@ def analyze_leaf_image(image_path, leaf_position="old"):
         "Magnesium": interveinal_chlorosis_score * (1.0 if old else 0.3),
         "Calcium": distortion_score * 2.8 * (1.0 if young else 0.5) * non_green_factor,
         "Sulfur": max(0.0, yellow_pct - interveinal_chlorosis_score * 0.3) * (1.0 if young else 0.4),
-        "Iron": (interveinal_chlorosis_score * (1.0 if young else 0.3)) + white_pct * 1.6,
+        "Iron": (interveinal_chlorosis_score * (1.15 if young else 0.3)) + white_pct * 0.9,
         "Manganese": (interveinal_chlorosis_score * (0.9 if young else 0.3)) + speckle_score * 2.5,
         "Zinc": distortion_score * 0.9 + interveinal_chlorosis_score * 0.5,
         "Boron": (distortion_score * 1.1 + brown_pct * 0.4) * (1.0 if young else 0.6),
@@ -701,6 +720,14 @@ def detect():
         crop_type, crop_confidence = detect_crop_type(save_path)
     except Exception:
         crop_type, crop_confidence = "Rice", 30.0
+
+    # Manual override: if the user picked a specific crop from the dropdown
+    # instead of leaving it on "Auto-detect", trust their choice -- they
+    # know their own field better than a shape heuristic does.
+    manual_crop = request.form.get("crop_type", "").strip()
+    if manual_crop and manual_crop in CROPS:
+        crop_type = manual_crop
+        crop_confidence = 100.0  # user-confirmed, not a guess
 
     treatment = get_treatment(crop_type, analysis["deficiency_type"])
     meta = DEFICIENCY_META.get(analysis["deficiency_type"], {})
