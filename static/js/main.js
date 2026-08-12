@@ -58,10 +58,83 @@ document.addEventListener("DOMContentLoaded", function () {
   const submitBtn = document.getElementById("submitBtn");
   const detectForm = document.getElementById("detectForm");
 
-  const cameraInput = document.getElementById("cameraInput");
+  const cameraFallbackInput = document.getElementById("cameraFallbackInput");
   const galleryInput = document.getElementById("galleryInput");
   const takePhotoBtn = document.getElementById("takePhotoBtn");
   const chooseGalleryBtn = document.getElementById("chooseGalleryBtn");
+
+  // ---- Live camera modal (getUserMedia) ----
+  const cameraModal = document.getElementById("cameraModal");
+  const cameraVideo = document.getElementById("cameraVideo");
+  const cameraCanvas = document.getElementById("cameraCanvas");
+  const cameraShutterBtn = document.getElementById("cameraShutterBtn");
+  const cameraCancelBtn = document.getElementById("cameraCancelBtn");
+  const cameraError = document.getElementById("cameraError");
+  let cameraStream = null;
+
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    if (cameraModal) cameraModal.classList.remove("cg-open");
+  }
+
+  async function openCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      // Camera API unsupported (old browser) -- fall back to OS picker.
+      if (cameraFallbackInput) cameraFallbackInput.click();
+      return;
+    }
+    if (cameraError) cameraError.style.display = "none";
+    cameraModal.classList.add("cg-open");
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false
+      });
+      cameraVideo.srcObject = cameraStream;
+    } catch (err) {
+      // Permission denied, no camera, or insecure context -- fall back to
+      // the OS file picker rather than leaving the user stuck.
+      stopCamera();
+      if (cameraFallbackInput) {
+        cameraFallbackInput.click();
+      } else if (window.cgToast) {
+        window.cgToast("Couldn't access the camera. Please allow camera permission or choose from gallery instead.", "danger");
+      }
+    }
+  }
+
+  function capturePhoto() {
+    if (!cameraVideo.videoWidth) return;
+    cameraCanvas.width = cameraVideo.videoWidth;
+    cameraCanvas.height = cameraVideo.videoHeight;
+    const ctx = cameraCanvas.getContext("2d");
+    ctx.drawImage(cameraVideo, 0, 0, cameraCanvas.width, cameraCanvas.height);
+    cameraCanvas.toBlob(blob => {
+      if (!blob) return;
+      const file = new File([blob], "leaf-photo-" + Date.now() + ".jpg", { type: "image/jpeg" });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      handlePreview(file);
+      stopCamera();
+    }, "image/jpeg", 0.92);
+  }
+
+  if (takePhotoBtn) takePhotoBtn.addEventListener("click", openCamera);
+  if (cameraCancelBtn) cameraCancelBtn.addEventListener("click", stopCamera);
+  if (cameraShutterBtn) cameraShutterBtn.addEventListener("click", capturePhoto);
+  if (cameraFallbackInput) {
+    cameraFallbackInput.addEventListener("change", () => {
+      if (!cameraFallbackInput.files.length) return;
+      const dt = new DataTransfer();
+      dt.items.add(cameraFallbackInput.files[0]);
+      fileInput.files = dt.files;
+      handlePreview(cameraFallbackInput.files[0]);
+    });
+  }
 
   function formatBytes(bytes) {
     if (bytes < 1024) return bytes + " B";
@@ -121,9 +194,8 @@ document.addEventListener("DOMContentLoaded", function () {
       if (fileInput.files.length) handlePreview(fileInput.files[0]);
     });
 
-    // "Take a photo" opens the device camera directly (capture="environment").
-    // "Choose from gallery" opens the normal file picker. Whichever the user
-    // picks gets copied into the single real form field (#leafImage) via
+    // "Choose from gallery" opens the normal file picker; the file gets
+    // copied into the single real form field (#leafImage) via
     // DataTransfer, since only one named file input can be submitted.
     function adoptFile(sourceInput) {
       if (!sourceInput.files.length) return;
@@ -131,10 +203,6 @@ document.addEventListener("DOMContentLoaded", function () {
       dt.items.add(sourceInput.files[0]);
       fileInput.files = dt.files;
       handlePreview(sourceInput.files[0]);
-    }
-    if (takePhotoBtn && cameraInput) {
-      takePhotoBtn.addEventListener("click", () => cameraInput.click());
-      cameraInput.addEventListener("change", () => adoptFile(cameraInput));
     }
     if (chooseGalleryBtn && galleryInput) {
       chooseGalleryBtn.addEventListener("click", () => galleryInput.click());
@@ -191,7 +259,22 @@ document.addEventListener("DOMContentLoaded", function () {
   // ============================================================
   // Admin dashboard charts (admin_dashboard.html)
   // ============================================================
+  function showChartFallback(canvasEl, message) {
+    if (!canvasEl) return;
+    const wrap = document.createElement("div");
+    wrap.className = "text-muted small text-center py-4";
+    wrap.innerHTML = '<i class="fa-solid fa-chart-simple mb-2 d-block" style="font-size:1.4rem;opacity:.4"></i>' + message;
+    canvasEl.replaceWith(wrap);
+  }
+
   const defChartEl = document.getElementById("deficiencyChart");
+  const sevChartElCheck = document.getElementById("severityChart");
+  if ((defChartEl || sevChartElCheck) && !window.Chart) {
+    // Chart.js failed to load (CDN blocked, offline, etc.) -- show a clear
+    // message instead of a silently blank box.
+    showChartFallback(defChartEl, "Chart library failed to load. Check your connection and refresh.");
+    showChartFallback(sevChartElCheck, "Chart library failed to load. Check your connection and refresh.");
+  }
   if (defChartEl && window.Chart && window.cgDeficiencyData) {
     new Chart(defChartEl, {
       type: "bar",
