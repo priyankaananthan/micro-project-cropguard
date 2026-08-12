@@ -389,10 +389,22 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     scorch_score = round(max(0.0, margin_brown_pct - interior_brown_pct), 2)
 
     # --- Dark speckle detection (proxy for Manganese necrotic spots) ---
-    dark_mask = cv2.bitwise_and(cv2.inRange(hsv, (0, 40, 0), (180, 255, 95)), leaf_mask)
+    # Real photos have natural shadows, dust, and minor blemishes that create
+    # many tiny dark specks regardless of the leaf's actual condition -- a
+    # flat synthetic test image doesn't have this noise, which is why this
+    # bug didn't show up until real photos were tested. Defenses: (1) blur
+    # first to merge away single-pixel noise, (2) real Manganese spotting
+    # only occurs on leaves that are already meaningfully chlorotic, so
+    # gate the whole signal off unless overall yellowing is present --
+    # generic shadows/dust on an otherwise green leaf don't qualify.
+    blurred = cv2.GaussianBlur(hsv, (5, 5), 0)
+    dark_mask = cv2.bitwise_and(cv2.inRange(blurred, (0, 40, 0), (180, 255, 95)), leaf_mask)
     contours, _ = cv2.findContours(dark_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    speckle_count = sum(1 for c in contours if 2 <= cv2.contourArea(c) <= 45)
-    speckle_score = round(min(100.0, speckle_count / leaf_pixels * 20000), 2)
+    speckle_count = sum(1 for c in contours if 4 <= cv2.contourArea(c) <= 45)
+    if yellow_pct < 10.0:
+        speckle_score = 0.0
+    else:
+        speckle_score = round(min(100.0, max(0, speckle_count - 3) / leaf_pixels * 20000), 2)
 
     # --- Leaf shape distortion (proxy for twisting/cupping/hooking) ---
     contours, _ = cv2.findContours(leaf_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -426,7 +438,7 @@ def analyze_leaf_image(image_path, leaf_position="old"):
         "Calcium": distortion_score * 2.8 * (1.0 if young else 0.5) * non_green_factor,
         "Sulfur": max(0.0, yellow_pct - interveinal_chlorosis_score * 0.3) * (1.0 if young else 0.4),
         "Iron": (interveinal_chlorosis_score * (1.15 if young else 0.3)) + white_pct * 0.9,
-        "Manganese": (interveinal_chlorosis_score * (0.9 if young else 0.3)) + speckle_score * 2.5,
+        "Manganese": (interveinal_chlorosis_score * (0.9 if young else 0.3)) + speckle_score * 2.0,
         "Zinc": distortion_score * 0.9 + interveinal_chlorosis_score * 0.5,
         "Boron": (distortion_score * 1.1 + brown_pct * 0.4) * (1.0 if young else 0.6),
         "Copper": distortion_score * 1.5 * copper_purity * (1.0 if young else 0.5),
