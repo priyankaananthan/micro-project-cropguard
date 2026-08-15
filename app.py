@@ -23,6 +23,9 @@ import random
 import string
 import io
 import csv
+import json
+import base64
+import requests
 from datetime import datetime
 from functools import wraps
 
@@ -62,6 +65,10 @@ app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB uploads
 
 DEFAULT_ADMIN_USER = os.environ.get("CROPGUARD_ADMIN_USER", "host")
 DEFAULT_ADMIN_PASS = os.environ.get("CROPGUARD_ADMIN_PASS", "CropGuard@2026")
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = "claude-sonnet-5"
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 CROPS = ["Rice", "Tomato", "Maize", "Wheat", "Cotton", "Chilli", "Groundnut"]
 
@@ -190,7 +197,8 @@ def init_db():
             dosage TEXT,
             recovery_time TEXT,
             risk_level TEXT,
-            overall_health TEXT
+            overall_health TEXT,
+            diagnosis_method TEXT NOT NULL DEFAULT 'heuristic'
         )
     """)
 
@@ -308,21 +316,53 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, s, v = cv2.split(hsv)
 
-    # --- Leaf mask (exclude background only) ---
-    # A strict saturation floor would wrongly exclude pale/white chlorotic
-    # leaf tissue (e.g. severe Iron deficiency turns leaves near-white).
-    # Instead, only exclude near-pure-white paper/overexposure and
-    # near-pure-black shadow -- everything else counts as leaf.
-    bg_white = cv2.inRange(hsv, (0, 0, 235), (180, 20, 255))
-    bg_black = cv2.inRange(hsv, (0, 0, 0), (180, 255, 18))
-    leaf_mask = cv2.bitwise_not(cv2.bitwise_or(bg_white, bg_black))
+    # --- Leaf mask: real foreground segmentation, not just color exclusion ---
+    # A simple "exclude near-white/near-black" mask fails badly on real
+    # phone photos with blurred/bokeh backgrounds (very common in macro
+    # leaf shots) -- it was letting the ENTIRE frame count as "leaf",
+    # diluting every color measurement with background pixels. GrabCut
+    # actually segments the photographed subject from its surroundings,
+    # assuming the leaf is roughly centered (a reasonable ask of the user).
+    leaf_mask = None
+    try:
+        # GrabCut's internal k-means initialization uses OpenCV's RNG, which
+        # is non-deterministic by default -- the SAME photo could otherwise
+        # get a different diagnosis on a re-scan, which is unacceptable.
+        cv2.setRNGSeed(42)
+        gc_work = 320  # downscaled working resolution -- full 512 GrabCut is too slow for a live request
+        small = cv2.resize(img, (gc_work, gc_work))
+        gc_mask = np.zeros((gc_work, gc_work), np.uint8)
+        bgd_model = np.zeros((1, 65), np.float64)
+        fgd_model = np.zeros((1, 65), np.float64)
+        rect = (int(gc_work * 0.06), int(gc_work * 0.06), int(gc_work * 0.88), int(gc_work * 0.88))
+        cv2.grabCut(small, gc_mask, rect, bgd_model, fgd_model, 4, cv2.GC_INIT_WITH_RECT)
+        small_result = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 255, 0).astype("uint8")
+        candidate = cv2.resize(small_result, (512, 512), interpolation=cv2.INTER_NEAREST)
+        coverage = cv2.countNonZero(candidate) / (512 * 512)
+        if 0.06 <= coverage <= 0.95:  # sane result -- neither empty nor "everything"
+            leaf_mask = candidate
+    except Exception:
+        pass
+
+    if leaf_mask is None:
+        # Fallback: simple background-color exclusion (still better than
+        # nothing if GrabCut fails or produces a degenerate mask).
+        bg_white = cv2.inRange(hsv, (0, 0, 235), (180, 20, 255))
+        bg_black = cv2.inRange(hsv, (0, 0, 0), (180, 255, 18))
+        leaf_mask = cv2.bitwise_not(cv2.bitwise_or(bg_white, bg_black))
     leaf_pixels = max(int(cv2.countNonZero(leaf_mask)), 1)
 
     # --- Color-band masks within the leaf ---
     green_mask = cv2.bitwise_and(cv2.inRange(hsv, (35, 40, 40), (85, 255, 255)), leaf_mask)
     yellow_mask = cv2.bitwise_and(cv2.inRange(hsv, (18, 40, 60), (34, 255, 255)), leaf_mask)
     brown_mask = cv2.bitwise_and(cv2.inRange(hsv, (5, 40, 20), (20, 255, 180)), leaf_mask)
-    purple_mask = cv2.bitwise_and(cv2.inRange(hsv, (125, 25, 20), (160, 255, 200)), leaf_mask)
+    # Anthocyanin purpling in real photos often reads as dark reddish-maroon
+    # in HSV, not pure violet -- it spans both the violet/magenta end
+    # (high hue) AND wraps around into low-hue reddish tones when dark and
+    # saturated (distinguishing it from brighter, drier brown scorch).
+    purple_violet = cv2.inRange(hsv, (130, 20, 20), (179, 255, 230))
+    purple_maroon = cv2.inRange(hsv, (0, 60, 25), (12, 255, 175))
+    purple_mask = cv2.bitwise_and(cv2.bitwise_or(purple_violet, purple_maroon), leaf_mask)
     white_mask_raw = cv2.bitwise_and(cv2.inRange(hsv, (0, 0, 170), (180, 35, 255)), leaf_mask)
     # Camera flash/glare on a glossy leaf creates small bright specular spots
     # that look identical to "white chlorosis" in raw HSV terms. A real
@@ -347,23 +387,43 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     core_mask = cv2.erode(leaf_mask, np.ones((9, 9), np.uint8), iterations=1)
     if cv2.countNonZero(core_mask) < 200:
         core_mask = leaf_mask  # very small leaf region in frame -- don't erode away everything
-    edges = cv2.Canny(gray, 40, 120)
-    edges = cv2.bitwise_and(edges, core_mask)
-    vein_mask = cv2.bitwise_and(cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1), core_mask)
+    # High thresholds + no dilation: real leaf photos have lots of fine
+    # texture (secondary veins, surface texture, lighting gradients) that
+    # a loose edge detector picks up almost everywhere, diluting the
+    # "vein greenness" signal to near-meaningless. Only genuinely strong,
+    # well-defined primary vein edges should count.
+    edges = cv2.Canny(gray, 150, 250)
+    vein_mask = cv2.bitwise_and(edges, core_mask)
     interveinal_mask = cv2.bitwise_and(core_mask, cv2.bitwise_not(vein_mask))
 
     vein_px = max(int(cv2.countNonZero(vein_mask)), 1)
     interveinal_px = max(int(cv2.countNonZero(interveinal_mask)), 1)
     vein_green_pct = cv2.countNonZero(cv2.bitwise_and(green_mask, vein_mask)) / vein_px * 100
-    interveinal_yellow_pct = cv2.countNonZero(cv2.bitwise_and(yellow_mask, interveinal_mask)) / interveinal_px * 100
+    # Advanced interveinal chlorosis often progresses past yellow into
+    # reddish-brown/purple as anthocyanins accumulate -- checking for
+    # yellow alone undercounts real, advanced-stage cases. Count any
+    # non-green discoloration between the veins.
+    interveinal_nongreen_mask = cv2.bitwise_or(cv2.bitwise_or(yellow_mask, purple_mask), brown_mask)
+    interveinal_nongreen_pct = cv2.countNonZero(cv2.bitwise_and(interveinal_nongreen_mask, interveinal_mask)) / interveinal_px * 100
     # Real-world photos have natural vein/lighting texture that Canny picks
     # up even on ordinary leaves. Gate on both components: below the
     # threshold, treat it as noise (score = 0); at or above it, use the
     # full raw signal so genuinely strong patterns aren't watered down.
-    if vein_green_pct >= 35.0 and interveinal_yellow_pct >= 30.0:
-        interveinal_chlorosis_score = round(min(100.0, (vein_green_pct * interveinal_yellow_pct) / 100), 2)
+    if vein_green_pct >= 35.0 and interveinal_nongreen_pct >= 20.0:
+        interveinal_chlorosis_score = round(min(100.0, (vein_green_pct * interveinal_nongreen_pct) / 100), 2)
     else:
         interveinal_chlorosis_score = 0.0
+
+    # --- Chlorotic patch structure: fine uniform marbling vs. large blotches ---
+    # Magnesium deficiency classically shows many small, evenly-distributed
+    # patches following the fine vein network. Zinc deficiency shows fewer,
+    # larger, more irregular blotches. Measure how much one dominant patch
+    # accounts for the total chlorotic area -- high means "blotchy", low
+    # means "fine marbling".
+    blotch_contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    blotch_areas = sorted([cv2.contourArea(c) for c in blotch_contours if cv2.contourArea(c) > 5], reverse=True)
+    blotch_total = sum(blotch_areas)
+    blotch_dominance_pct = (blotch_areas[0] / blotch_total * 100) if blotch_total > 0 and blotch_areas else 0.0
 
     # --- Margin (scorch) analysis ---
     # Pad with a background border first: if the leaf fills the entire
@@ -384,9 +444,14 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     interior_mask = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(margin_mask))
     margin_px = max(int(cv2.countNonZero(margin_mask)), 1)
     interior_px = max(int(cv2.countNonZero(interior_mask)), 1)
-    margin_brown_pct = cv2.countNonZero(cv2.bitwise_and(brown_mask, margin_mask)) / margin_px * 100
-    interior_brown_pct = cv2.countNonZero(cv2.bitwise_and(brown_mask, interior_mask)) / interior_px * 100
-    scorch_score = round(max(0.0, margin_brown_pct - interior_brown_pct), 2)
+    # Real scorch/drying progresses through a color range -- golden-tan
+    # through to dark brown -- not one fixed hue. Checking brown alone
+    # undercounts real cases where the margin has only dried to tan/gold
+    # rather than fully browned yet.
+    scorch_mask = cv2.bitwise_or(brown_mask, yellow_mask)
+    margin_scorch_pct = cv2.countNonZero(cv2.bitwise_and(scorch_mask, margin_mask)) / margin_px * 100
+    interior_scorch_pct = cv2.countNonZero(cv2.bitwise_and(scorch_mask, interior_mask)) / interior_px * 100
+    scorch_score = round(max(0.0, margin_scorch_pct - interior_scorch_pct), 2)
 
     # --- Dark speckle detection (proxy for Manganese necrotic spots) ---
     # Real photos have natural shadows, dust, and minor blemishes that create
@@ -431,18 +496,18 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     # --- Weighted scoring across all 13 classes ---
     scores = {
         "Healthy": green_pct * 1.0,
-        "Nitrogen": max(0.0, yellow_pct - interveinal_chlorosis_score * 0.5) * (1.0 if old else 0.4),
+        "Nitrogen": max(0.0, yellow_pct - interveinal_chlorosis_score * 1.5) * (1.0 if old else 0.4),
         "Phosphorus": purple_pct * 1.3,
-        "Potassium": (scorch_score * 1.4 + brown_pct * 0.4) * (1.0 if old else 0.5),
-        "Magnesium": interveinal_chlorosis_score * (1.0 if old else 0.3),
+        "Potassium": (scorch_score * 2.2 + brown_pct * 0.4) * (1.0 if old else 0.5),
+        "Magnesium": interveinal_chlorosis_score * (1.0 if old else 0.3) * max(0.3, 1.0 - blotch_dominance_pct / 140.0) + speckle_score * (0.5 if old else 0.05),
         "Calcium": distortion_score * 2.8 * (1.0 if young else 0.5) * non_green_factor,
-        "Sulfur": max(0.0, yellow_pct - interveinal_chlorosis_score * 0.3) * (1.0 if young else 0.4),
+        "Sulfur": max(0.0, yellow_pct - interveinal_chlorosis_score * 1.5) * (1.0 if young else 0.4),
         "Iron": (interveinal_chlorosis_score * (1.15 if young else 0.3)) + white_pct * 0.9,
-        "Manganese": (interveinal_chlorosis_score * (0.9 if young else 0.3)) + speckle_score * 2.0,
-        "Zinc": distortion_score * 0.9 + interveinal_chlorosis_score * 0.5,
+        "Manganese": (interveinal_chlorosis_score * (0.9 if young else 0.3)) + speckle_score * 2.0 * (1.0 if young else 0.3),
+        "Zinc": distortion_score * 0.9 + interveinal_chlorosis_score * (0.3 + blotch_dominance_pct / 100.0) * (1.0 if old else 0.5),
         "Boron": (distortion_score * 1.1 + brown_pct * 0.4) * (1.0 if young else 0.6),
         "Copper": distortion_score * 1.5 * copper_purity * (1.0 if young else 0.5),
-        "Molybdenum": (distortion_score * 1.3 + scorch_score * 0.7) * (1.0 if old else 0.5),
+        "Molybdenum": (distortion_score * 0.9 + scorch_score * 0.5) * (1.0 if old else 0.5),
     }
 
     # Healthy wins only if green dominates and nothing else scores meaningfully
@@ -565,6 +630,128 @@ def detect_crop_type(image_path):
     return best_crop, confidence
 
 
+def analyze_leaf_with_claude(image_path, leaf_position):
+    """
+    Send the leaf photo to Claude's vision API for real image-based
+    diagnosis, replacing the old color-heuristic guesswork. Returns a dict
+    matching the shape the rest of the app expects, or None if the API
+    key isn't configured or the call fails for any reason (caller should
+    fall back to the heuristic engine in that case).
+    """
+    if not ANTHROPIC_API_KEY:
+        return None
+
+    ext = image_path.rsplit(".", 1)[-1].lower()
+    media_type = {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "png": "image/png", "webp": "image/webp",
+    }.get(ext, "image/jpeg")
+
+    try:
+        with open(image_path, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        return None
+
+    deficiency_list = "\n".join(
+        f'- "{name}" ({meta["category"]}): {meta["symptom"]}'
+        for name, meta in DEFICIENCY_META.items()
+    )
+    crop_list = ", ".join(CROPS)
+    leaf_pos_text = "an OLDER / LOWER leaf" if leaf_position == "old" else "a NEWER / YOUNGER leaf"
+
+    prompt = f"""You are an agronomy expert analyzing a photo of a crop leaf to diagnose nutrient deficiencies.
+
+The person photographed {leaf_pos_text} on the plant. This matters: mobile nutrients (N, P, K, Mg) show symptoms on OLDER leaves first; immobile nutrients (Ca, Fe, Mn, Zn, B, Cu, Mo, S) show symptoms on NEWER leaves first.
+
+Classify the leaf into exactly ONE of these categories:
+{deficiency_list}
+
+Also identify the crop species -- your best guess from this list if it clearly matches one: {crop_list}. If it doesn't clearly match any of those, give your best general guess of the actual species anyway.
+
+Respond with ONLY a raw JSON object (no markdown fences, no other text) in exactly this shape:
+{{
+  "crop_type": "<one crop name, your best guess even if uncertain>",
+  "crop_confidence": <0-100 integer, how confident you are in the crop identification>,
+  "deficiency_type": "<one of the exact category names above>",
+  "confidence": <0-100 integer, how confident you are in the diagnosis>,
+  "severity_level": "<None, Mild, Moderate, or Severe -- None only if deficiency_type is Healthy>",
+  "affected_area_pct": <0-100 integer, rough percent of visible leaf area showing symptoms>,
+  "visual_symptoms": "<one or two sentences describing exactly what you observe in THIS photo that supports your diagnosis>"
+}}"""
+
+    try:
+        response = requests.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": ANTHROPIC_MODEL,
+                "max_tokens": 500,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }],
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        parsed = json.loads(text.strip())
+    except Exception as exc:
+        app.logger.error(f"Claude vision analysis failed: {exc}")
+        return None
+
+    deficiency_type = parsed.get("deficiency_type", "")
+    if deficiency_type not in ALL_DEFICIENCY_TYPES:
+        return None  # malformed/unexpected response -- let caller fall back
+
+    crop_type = parsed.get("crop_type", "")
+    if not crop_type:
+        crop_type = "Rice"
+
+    confidence = max(0.0, min(100.0, float(parsed.get("confidence", 50))))
+    crop_confidence = max(0.0, min(100.0, float(parsed.get("crop_confidence", 50))))
+    severity_level = parsed.get("severity_level", "Mild")
+    if severity_level not in ("None", "Mild", "Moderate", "Severe"):
+        severity_level = "None" if deficiency_type == "Healthy" else "Mild"
+    affected_area_pct = max(0.0, min(100.0, float(parsed.get("affected_area_pct", 0))))
+    visual_symptoms = parsed.get("visual_symptoms", "") or DEFICIENCY_META.get(deficiency_type, {}).get("symptom", "")
+
+    if deficiency_type == "Healthy":
+        risk_level, overall_health = "Low", "Healthy"
+    else:
+        risk_level = {"Mild": "Low", "Moderate": "Medium", "Severe": "High"}.get(severity_level, "Medium")
+        overall_health = "Deficient"
+
+    confidence_tier = "high" if confidence >= 80 else "medium" if confidence >= 55 else "low"
+
+    return {
+        "crop_type": crop_type,
+        "crop_confidence": round(crop_confidence, 1),
+        "deficiency_type": deficiency_type,
+        "confidence": round(confidence, 1),
+        "confidence_tier": confidence_tier,
+        "severity_level": severity_level,
+        "affected_area_pct": round(affected_area_pct, 1),
+        "risk_level": risk_level,
+        "overall_health": overall_health,
+        "visual_symptoms": visual_symptoms,
+    }
+
+
 def get_treatment(crop_type, deficiency_type):
     db = get_db()
     row = db.execute(
@@ -675,11 +862,19 @@ def generate_pdf_report(record, image_path):
         elements.append(Spacer(1, 2 * mm))
 
     elements.append(Spacer(1, 10 * mm))
+    if record.get("diagnosis_method") == "claude_vision":
+        footnote_text = (
+            "This diagnosis was generated by Claude Vision AI analyzing the actual leaf photo, and is intended as "
+            "a decision-support aid. For high-value crops or persistent symptoms, confirm with a certified agronomist."
+        )
+    else:
+        footnote_text = (
+            "AI vision analysis was unavailable for this scan, so this report used a fallback rule-based "
+            "computer-vision pipeline (HSV color analysis, not a trained model) -- treat it as lower-confidence. "
+            "For high-value crops or persistent symptoms, confirm with a certified agronomist."
+        )
     elements.append(Paragraph(
-        "This report is generated by a rule-based computer-vision pipeline (HSV color analysis, not a trained "
-        "neural network) and is intended as a decision-support aid only. Shape/texture-based diagnoses "
-        "(Calcium, Copper, Molybdenum, Boron, Zinc) are lower-confidence than color-based ones. For high-value "
-        "crops or persistent symptoms, confirm with a certified agronomist.",
+        footnote_text,
         ParagraphStyle("Footnote", parent=styles["Normal"], fontSize=8, textColor=colors.grey)
     ))
 
@@ -722,20 +917,47 @@ def detect():
     file.save(save_path)
 
     try:
-        analysis = analyze_leaf_image(save_path, leaf_position=leaf_position)
+        spectral = analyze_leaf_image(save_path, leaf_position=leaf_position)
     except Exception as exc:
         app.logger.error(f"Leaf analysis failed for {filename}: {exc}")
         flash("Please make sure the image contains a clear crop leaf and try again.", "danger")
         return redirect(url_for("detect"))
 
-    try:
-        crop_type, crop_confidence = detect_crop_type(save_path)
-    except Exception:
-        crop_type, crop_confidence = "Rice", 30.0
+    # Primary diagnosis: Claude's vision model actually looks at the photo.
+    # Falls back to the color-heuristic engine only if no API key is set
+    # or the API call fails, so the app still works either way.
+    claude_result = analyze_leaf_with_claude(save_path, leaf_position)
+    used_ai_vision = claude_result is not None
+
+    if used_ai_vision:
+        analysis = {
+            "deficiency_type": claude_result["deficiency_type"],
+            "confidence": claude_result["confidence"],
+            "confidence_tier": claude_result["confidence_tier"],
+            "severity_level": claude_result["severity_level"],
+            "affected_area_pct": claude_result["affected_area_pct"],
+            "risk_level": claude_result["risk_level"],
+            "overall_health": claude_result["overall_health"],
+            "green_pct": spectral["green_pct"],
+            "yellow_pct": spectral["yellow_pct"],
+            "brown_pct": spectral["brown_pct"],
+            "purple_pct": spectral["purple_pct"],
+            "white_pct": spectral["white_pct"],
+        }
+        crop_type = claude_result["crop_type"] if claude_result["crop_type"] in CROPS else "Rice"
+        crop_confidence = claude_result["crop_confidence"]
+        visual_symptoms_override = claude_result["visual_symptoms"]
+    else:
+        analysis = spectral
+        try:
+            crop_type, crop_confidence = detect_crop_type(save_path)
+        except Exception:
+            crop_type, crop_confidence = "Rice", 30.0
+        visual_symptoms_override = None
 
     # Manual override: if the user picked a specific crop from the dropdown
     # instead of leaving it on "Auto-detect", trust their choice -- they
-    # know their own field better than a shape heuristic does.
+    # know their own field better than any guess.
     manual_crop = request.form.get("crop_type", "").strip()
     if manual_crop and manual_crop in CROPS:
         crop_type = manual_crop
@@ -751,7 +973,8 @@ def detect():
         "leaf_position": leaf_position,
         "image_filename": filename,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "visual_symptoms": meta.get("symptom", ""),
+        "visual_symptoms": visual_symptoms_override or meta.get("symptom", ""),
+        "diagnosis_method": "claude_vision" if used_ai_vision else "heuristic",
         **analysis,
         **treatment,
     }
@@ -762,15 +985,15 @@ def detect():
             report_id, crop_type, crop_confidence, leaf_position, image_filename, created_at, deficiency_type, confidence,
             confidence_tier, severity_level, affected_area_pct, green_pct, yellow_pct, brown_pct, purple_pct,
             white_pct, visual_symptoms, immediate_action, recommended_fertilizer, application_method,
-            dosage, recovery_time, risk_level, overall_health
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            dosage, recovery_time, risk_level, overall_health, diagnosis_method
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         record["report_id"], record["crop_type"], record["crop_confidence"], record["leaf_position"], record["image_filename"], record["created_at"],
         record["deficiency_type"], record["confidence"], record["confidence_tier"], record["severity_level"],
         record["affected_area_pct"], record["green_pct"], record["yellow_pct"], record["brown_pct"], record["purple_pct"],
         record["white_pct"], record["visual_symptoms"], record["immediate_action"], record["recommended_fertilizer"],
         record["application_method"], record["dosage"], record["recovery_time"],
-        record["risk_level"], record["overall_health"]
+        record["risk_level"], record["overall_health"], record["diagnosis_method"]
     ))
     db.commit()
 
