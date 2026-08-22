@@ -496,9 +496,9 @@ def analyze_leaf_image(image_path, leaf_position="old"):
     # --- Weighted scoring across all 13 classes ---
     scores = {
         "Healthy": green_pct * 1.0,
-        "Nitrogen": max(0.0, yellow_pct - interveinal_chlorosis_score * 1.5) * (1.0 if old else 0.4),
+        "Nitrogen": max(0.0, yellow_pct - interveinal_chlorosis_score * 1.5 - scorch_score * 1.8) * (1.0 if old else 0.4),
         "Phosphorus": purple_pct * 1.3,
-        "Potassium": (scorch_score * 2.2 + brown_pct * 0.4) * (1.0 if old else 0.5),
+        "Potassium": (scorch_score * 3.0 + brown_pct * 0.4) * (1.0 if old else 0.5),
         "Magnesium": interveinal_chlorosis_score * (1.0 if old else 0.3) * max(0.3, 1.0 - blotch_dominance_pct / 140.0) + speckle_score * (0.5 if old else 0.05),
         "Calcium": distortion_score * 2.8 * (1.0 if young else 0.5) * non_green_factor,
         "Sulfur": max(0.0, yellow_pct - interveinal_chlorosis_score * 1.5) * (1.0 if young else 0.4),
